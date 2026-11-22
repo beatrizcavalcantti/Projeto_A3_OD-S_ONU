@@ -1,10 +1,17 @@
+-- =====================================================================
+-- PROJETO: REDE ESPERANÇA – GESTÃO DE DOAÇÕES
+-- SCRIPT COMPLETO: DDL, DML, TRIGGERS, PROCEDURES E CONSULTAS ANALÍTICAS
+-- =====================================================================
+
 DROP DATABASE IF EXISTS rede_esperanca;
 
 CREATE DATABASE IF NOT EXISTS rede_esperanca
   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 USE rede_esperanca;
 
-
+-- ---------------------------------------------------------------------
+-- 1. UNIDADES E USUÁRIOS
+-- ---------------------------------------------------------------------
 CREATE TABLE unidades (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   nome        VARCHAR(150) NOT NULL UNIQUE,
@@ -22,18 +29,20 @@ CREATE TABLE usuarios (
   FOREIGN KEY (unidade_id) REFERENCES unidades(id)
 );
 
-
+-- ---------------------------------------------------------------------
+-- 2. FAMÍLIAS E HISTÓRICO
+-- ---------------------------------------------------------------------
 CREATE TABLE familias (
   id                    BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   unidade_id            BIGINT UNSIGNED NOT NULL,
   nome_responsavel      VARCHAR(150) NOT NULL,
-  cpf                   CHAR(11) NOT NULL UNIQUE,            
+  cpf                   CHAR(11) NOT NULL UNIQUE,
   endereco              VARCHAR(255) NOT NULL,
   bairro                VARCHAR(100),
   num_pessoas           SMALLINT UNSIGNED NOT NULL,
   status                ENUM('aguardando_cesta','cesta_entregue','em_analise')
                         NOT NULL DEFAULT 'aguardando_cesta',
-  observacoes           TEXT,                                 
+  observacoes           TEXT,
   consentimento_lgpd_em DATETIME,
   ultima_entrega_em     DATETIME,
   created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -56,7 +65,9 @@ CREATE TABLE historico_status_familia (
   FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
 );
 
-
+-- ---------------------------------------------------------------------
+-- 3. ESTOQUE E LOTES
+-- ---------------------------------------------------------------------
 CREATE TABLE origens_doacao (
   id    BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   nome  VARCHAR(150) NOT NULL UNIQUE
@@ -64,11 +75,10 @@ CREATE TABLE origens_doacao (
 
 CREATE TABLE itens (
   id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  nome            VARCHAR(150) NOT NULL UNIQUE,             
+  nome            VARCHAR(150) NOT NULL UNIQUE,
   unidade_medida  VARCHAR(20) NOT NULL DEFAULT 'un',
   ativo           BOOLEAN NOT NULL DEFAULT TRUE
 );
-
 
 CREATE TABLE lotes_estoque (
   id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -86,8 +96,10 @@ CREATE TABLE lotes_estoque (
   INDEX idx_lotes_unidade_item (unidade_id, item_id)
 );
 
-
-CREATE TABLE cestas (                                         
+-- ---------------------------------------------------------------------
+-- 4. CESTAS E DISTRIBUIÇÃO
+-- ---------------------------------------------------------------------
+CREATE TABLE cestas (
   id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   unidade_id   BIGINT UNSIGNED NOT NULL,
   status       ENUM('disponivel','reservada','entregue','cancelada') NOT NULL DEFAULT 'disponivel',
@@ -107,14 +119,13 @@ CREATE TABLE cesta_itens (
   FOREIGN KEY (lote_id)  REFERENCES lotes_estoque(id)
 );
 
-
 CREATE TABLE movimentacoes_estoque (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   lote_id     BIGINT UNSIGNED NOT NULL,
   tipo        ENUM('entrada','saida','ajuste') NOT NULL,
-  delta       INT NOT NULL,                                     
+  delta       INT NOT NULL,
   motivo      VARCHAR(255),
-  cesta_id    BIGINT UNSIGNED,                                 
+  cesta_id    BIGINT UNSIGNED,
   usuario_id  BIGINT UNSIGNED,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT ck_mov_delta CHECK (delta <> 0),
@@ -135,7 +146,6 @@ CREATE TABLE agendamentos (
   concluido_em   DATETIME,
   concluido_por  BIGINT UNSIGNED,
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
   cesta_ativa    BIGINT UNSIGNED GENERATED ALWAYS AS
                  (IF(status IN ('agendado','concluido'), cesta_id, NULL)) STORED,
   UNIQUE KEY uq_agendamento_cesta (cesta_ativa),
@@ -146,7 +156,9 @@ CREATE TABLE agendamentos (
   INDEX idx_agendamentos_data (data_hora)
 );
 
-
+-- ---------------------------------------------------------------------
+-- 5. CAMPANHAS E METAS
+-- ---------------------------------------------------------------------
 CREATE TABLE campanhas (
   id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   unidade_id       BIGINT UNSIGNED NOT NULL,
@@ -160,14 +172,16 @@ CREATE TABLE campanhas (
 
 CREATE TABLE metas_mensais (
   unidade_id     BIGINT UNSIGNED NOT NULL,
-  mes            DATE NOT NULL,                                 
+  mes            DATE NOT NULL,
   meta_entregas  INT NOT NULL,
   PRIMARY KEY (unidade_id, mes),
   CONSTRAINT ck_meta CHECK (meta_entregas > 0),
   FOREIGN KEY (unidade_id) REFERENCES unidades(id)
 );
 
-
+-- ---------------------------------------------------------------------
+-- 6. TRIGGERS E PROCEDURES
+-- ---------------------------------------------------------------------
 DELIMITER $$
 
 CREATE TRIGGER familia_before_update BEFORE UPDATE ON familias
@@ -243,8 +257,9 @@ END$$
 
 DELIMITER ;
 
-
-
+-- ---------------------------------------------------------------------
+-- 7. VIEWS ANALÍTICAS
+-- ---------------------------------------------------------------------
 CREATE VIEW v_dashboard_kpis AS
 SELECT u.id AS unidade_id,
   (SELECT COUNT(*) FROM cestas c WHERE c.unidade_id = u.id AND c.status = 'disponivel')           AS cestas_disponiveis,
@@ -253,7 +268,6 @@ SELECT u.id AS unidade_id,
   (SELECT COUNT(*) FROM agendamentos a JOIN familias f ON f.id = a.familia_id
     WHERE f.unidade_id = u.id AND a.status = 'concluido')                                         AS entregas_realizadas
 FROM unidades u;
-
 
 CREATE VIEW v_status_familias AS
 SELECT unidade_id, status, COUNT(*) AS qtd,
@@ -271,13 +285,14 @@ FROM lotes_estoque l
 JOIN itens i ON i.id = l.item_id
 LEFT JOIN origens_doacao o ON o.id = l.origem_id;
 
-
 CREATE VIEW v_agendamentos AS
 SELECT a.id, f.unidade_id, f.nome_responsavel, a.data_hora, a.tipo, a.cesta_id, a.status
 FROM agendamentos a
 JOIN familias f ON f.id = a.familia_id;
 
-
+-- ---------------------------------------------------------------------
+-- 8. DADOS DE EXEMPLO (DML)
+-- ---------------------------------------------------------------------
 INSERT INTO unidades(nome) VALUES ('Unidade Vila Esperança');
 SET @un = LAST_INSERT_ID();
 
@@ -307,7 +322,6 @@ INSERT INTO lotes_estoque(unidade_id, item_id, origem_id, validade) VALUES
   (@un, (SELECT id FROM itens WHERE nome = 'Leite em Pó (400g)'),    (SELECT id FROM origens_doacao WHERE nome = 'Associação Comercial'),      '2026-10-15'),
   (@un, (SELECT id FROM itens WHERE nome = 'Macarrão (500g)'),       (SELECT id FROM origens_doacao WHERE nome = 'Mutirão Igreja Local'),      '2027-01-10');
 
-
 SET @l1 = (SELECT l.id FROM lotes_estoque l JOIN itens i ON i.id = l.item_id WHERE i.nome = 'Cesta Básica Completa');
 SET @l2 = (SELECT l.id FROM lotes_estoque l JOIN itens i ON i.id = l.item_id WHERE i.nome = 'Arroz (5kg)');
 SET @l3 = (SELECT l.id FROM lotes_estoque l JOIN itens i ON i.id = l.item_id WHERE i.nome = 'Feijão (1kg)');
@@ -325,7 +339,6 @@ INSERT INTO movimentacoes_estoque(lote_id, tipo, delta, motivo, usuario_id) VALU
 
 INSERT INTO cestas(unidade_id, montada_por) VALUES (@un, @usr), (@un, @usr), (@un, @usr), (@un, @usr), (@un, @usr);
 
-
 SET @fam1 = (SELECT id FROM familias WHERE nome_responsavel = 'Maria Aparecida dos Santos');
 SET @fam2 = (SELECT id FROM familias WHERE nome_responsavel = 'Carlos Eduardo Lima');
 SET @ces1 = (SELECT MIN(id) FROM cestas WHERE status = 'disponivel');
@@ -339,10 +352,42 @@ INSERT INTO campanhas(unidade_id, titulo, descricao, proxima_entrega) VALUES
 
 INSERT INTO metas_mensais(unidade_id, mes, meta_entregas) VALUES (@un, '2026-11-01', 100);
 
+-- ---------------------------------------------------------------------
+-- 9. BLOCO DE CONSULTAS ANALÍTICAS (Exigência do Analista de Dados)
+-- ---------------------------------------------------------------------
 
-SELECT VERSION() AS versao_mysql;               
-SELECT * FROM v_dashboard_kpis;                 
-SELECT * FROM v_status_familias;                
-SELECT * FROM v_estoque_cards;                  
-SELECT * FROM v_agendamentos;                   
+-- Consulta 1: Listar todas as famílias em ordem alfabética
+SELECT * FROM familias ORDER BY nome_responsavel ASC;
 
+-- Consulta 2: Filtrar famílias aguardando cesta
+SELECT nome_responsavel, endereco, bairro, num_pessoas FROM familias WHERE status = 'aguardando_cesta';
+
+-- Consulta 3: Total de pessoas beneficiadas por status da família
+SELECT status, COUNT(*) AS total_familias, SUM(num_pessoas) AS total_pessoas FROM familias GROUP BY status;
+
+-- Consulta 4: Histórico de alteração de status das famílias
+SELECT f.nome_responsavel, h.status_anterior, h.status_novo, h.created_at 
+FROM historico_status_familia h JOIN familias f ON f.id = h.familia_id;
+
+-- Consulta 5: Situação geral do estoque através da view
+SELECT * FROM v_estoque_cards;
+
+-- Consulta 6: Lotes com validade vencida
+SELECT l.id AS lote_id, i.nome AS item, l.validade, l.quantidade_atual 
+FROM lotes_estoque l JOIN itens i ON i.id = l.item_id WHERE l.validade < CURDATE();
+
+-- Consulta 7: Somatório de estoque atual por tipo de item
+SELECT i.nome AS item, SUM(l.quantidade_atual) AS estoque_total, i.unidade_medida 
+FROM lotes_estoque l JOIN itens i ON i.id = l.item_id GROUP BY i.id, i.nome, i.unidade_medida;
+
+-- Consulta 8: Entradas de doações agrupadas por origem
+SELECT o.nome AS origem_doacao, SUM(m.delta) AS total_recebido
+FROM movimentacoes_estoque m JOIN lotes_estoque l ON l.id = m.lote_id LEFT JOIN origens_doacao o ON o.id = l.origem_id
+WHERE m.tipo = 'entrada' GROUP BY o.nome;
+
+-- Consulta 9: Cestas atualmente disponíveis para agendamento
+SELECT id, status, montada_em FROM cestas WHERE status = 'disponivel';
+
+-- Consulta 10: Agendamentos de retirada pendentes
+SELECT a.id, f.nome_responsavel, a.data_hora, a.tipo, a.status 
+FROM agendamentos a JOIN familias f ON f.id = a.familia_id WHERE a.status = 'agendado';
